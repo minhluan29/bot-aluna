@@ -590,4 +590,6 @@ client.on("messageCreate", async (message) => {
   }
 });
 
-client.login();
+client.login(
+  "MTI1MjE5MDk3NzY5NTgwOTU4Nw.G2ngzx.8WkEoQptpKpuH52JtPYjk60_UdheQkkFer59E8"
+);
