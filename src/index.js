@@ -1,21 +1,48 @@
 const { Client, IntentsBitField, AttachmentBuilder } = require("discord.js");
-const { GatewayIntentBits } = require("discord-api-types/v9");
+const {
+  AudioPlayer,
+  createAudioResource,
+  StreamType,
+  entersState,
+  VoiceConnectionStatus,
+  joinVoiceChannel,
+} = require("@discordjs/voice");
+const discordTTS = require("discord-tts");
+const TTS_C = new Map();
+let voiceConnection;
+let audioPlayer = new AudioPlayer();
+/**
+ *
+ * @param {Client} client
+ */
+let timeoutID = null;
+const timeoutDuration = 30000;
+let OpusScript;
+try {
+  OpusScript = require("@discordjs/opus");
+} catch (err) {
+  try {
+    OpusScript = require("node-opus");
+  } catch (err) {
+    OpusScript = require("opusscript");
+  }
+}
 const axios = require("axios");
-
 const fs = require("fs");
 const moment = require("moment");
 const path = require("path");
-const sharp = require("sharp");
-const ytdl = require("ytdl-core");
 const { createCanvas, loadImage } = require("canvas");
+
 const {
-  joinVoiceChannel,
-  createAudioPlayer,
-  createAudioResource,
-  AudioPlayerStatus,
-  VoiceConnectionStatus,
-} = require("@discordjs/voice");
-const { nai, ga, tom, ca, bau, cua } = require("./config.json");
+  token,
+  BOT_ID,
+  REQUIRED_ROLE_ID,
+  REQUIRED_ROLE_ID_BANANA_LINK_EMPLOYEES,
+  PREFIX,
+  PREFIX_NOI_TU,
+} = require("../config.json");
+const { character, nai, ga, tom, ca, bau, cua } = require("./common/data.json");
+
 const client = new Client({
   intents: [
     IntentsBitField.Flags.Guilds,
@@ -27,46 +54,60 @@ const client = new Client({
   ],
 });
 
-const BOT_ID = "1252190977695809587";
-const REQUIRED_ROLE_ID = "867755897672564776";
-const REQUIRED_ROLE_ID_BANANA_LINK_EMPLOYEES = "1208958100347031603"; // Thay thế bằng ID của role cần kiểm tra
-const PREFIX = "-";
-const PREFIX_NOI_TU = ".";
 let currentWord = "";
-let lastMessageId = "";
-const character = [
-  "a",
-  "b",
-  "c",
-  "d",
-  "e",
-  "f",
-  "g",
-  "h",
-  "i",
-  "j",
-  "k",
-  "l",
-  "m",
-  "n",
-  "o",
-  "p",
-  "q",
-  "r",
-  "s",
-  "t",
-  "u",
-  "v",
-  "w",
-  "x",
-  "y",
-  "z",
-];
 
 client.on("ready", (e) => {
   console.log(`Logged in ready! ${e.user.tag} !`);
 });
+client.on("messageCreate", async (msg) => {
+  if (msg.content.startsWith("ns")) {
+    const voiceChannel = msg.member.voice.channel;
+    const text = msg.content.slice(4); // Extract text after the command
+    if (!voiceChannel) return msg.reply("Bạn cần vào voice channel trước !");
+    if (text.length < 4) return msg.reply("Bạn cần nhập nội dung cần nói !");
+    if (TTS_C.get("start") && TTS_C.get("start").channel.id !== voiceChannel.id)
+      return msg.reply("Tui đang phát ở một kênh khác, xin vui lòng chờ đợi !");
+    const stream = discordTTS.getVoiceStream(text, { lang: "vi" });
+    const audioResource = createAudioResource(stream, {
+      inputType: StreamType.Arbitrary,
+      inlineVolume: true,
+    });
+    if (
+      !voiceConnection ||
+      voiceConnection?.status === VoiceConnectionStatus.Disconnected
+    ) {
+      voiceConnection = joinVoiceChannel({
+        channelId: msg.member.voice.channelId,
+        guildId: msg.guildId,
+        adapterCreator: msg.guild.voiceAdapterCreator,
+      });
+      voiceConnection = await entersState(
+        voiceConnection,
+        VoiceConnectionStatus.Connecting,
+        5_000
+      );
+    }
 
+    if (voiceConnection.status === VoiceConnectionStatus.Connected) {
+      voiceConnection.subscribe(audioPlayer);
+      await audioPlayer.play(audioResource);
+      if (!TTS_C.get("start")) {
+        TTS_C.set("start", {
+          connect: voiceConnection,
+          channel: voiceChannel,
+        });
+      }
+      if (timeoutID) {
+        clearTimeout(timeoutID);
+      }
+      timeoutID = setTimeout(() => {
+        voiceConnection.disconnect();
+        TTS_C.delete("start");
+        timeoutID = null; // Reset the timeoutID after it expires
+      }, timeoutDuration);
+    }
+  }
+});
 //-----------------------NỐI - TỪ-------------------------------
 client.on("messageCreate", async (msg) => {
   if (msg.author.bot) return; // Bỏ qua các tin nhắn từ bot khác
@@ -544,52 +585,7 @@ client.on("messageCreate", async (message) => {
     }
   }
 
-  //-----------------MUSIC----------------
-  if (command.startsWith("music ")) {
-    const args = command.split(" ");
-    const url = args[1];
-
-    if (!ytdl.validateURL(url)) {
-      return message.reply("Please provide a valid YouTube link.");
-    }
-
-    if (message.member.voice.channel) {
-      const connection = joinVoiceChannel({
-        channelId: message.member.voice.channel.id,
-        guildId: message.guild.id,
-        adapterCreator: message.guild.voiceAdapterCreator,
-      });
-
-      connection.on(VoiceConnectionStatus.Ready, () => {
-        console.log("The bot has connected to the channel!");
-      });
-
-      const stream = ytdl(url, { filter: "audioonly" });
-      const resource = createAudioResource(stream);
-
-      const player = createAudioPlayer();
-      player.play(resource);
-      connection.subscribe(player);
-
-      player.on(AudioPlayerStatus.Playing, () => {
-        console.log("The audio player has started playing!");
-      });
-
-      player.on(AudioPlayerStatus.Idle, () => {
-        console.log("The audio player is idle.");
-        connection.destroy();
-      });
-
-      player.on("error", (error) => {
-        console.error("Error:", error.message);
-        connection.destroy();
-      });
-    } else {
-      message.reply("You need to join a voice channel first!");
-    }
-  }
+  //-----------------SPEAK - VOICE----------------
 });
 
-client.login(
-  "MTI1MjE5MDk3NzY5NTgwOTU4Nw.G2ngzx.8WkEoQptpKpuH52JtPYjk60_UdheQkkFer59E8"
-);
+client.login(token);
