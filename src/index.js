@@ -97,14 +97,18 @@ client.on("messageCreate", async (msg) => {
           channel: voiceChannel,
         });
       }
-      if (timeoutID) {
-        clearTimeout(timeoutID);
-      }
-      timeoutID = setTimeout(() => {
-        voiceConnection.disconnect();
-        TTS_C.delete("start");
-        timeoutID = null; // Reset the timeoutID after it expires
-      }, timeoutDuration);
+      // if (timeoutID) {
+      //   clearTimeout(timeoutID);
+      // }
+      // timeoutID = setTimeout(() => {
+      //   voiceConnection.disconnect({
+      //     channelId: msg.member.voice.channelId,
+      //     guildId: msg.guildId,
+      //     adapterCreator: msg.guild.voiceAdapterCreator,
+      //   });
+      //   TTS_C.delete("start");
+      //   timeoutID = null; // Reset the timeoutID after it expires
+      // }, timeoutDuration);
     }
   }
 });
