@@ -62,9 +62,9 @@ client.on("ready", (e) => {
 client.on("messageCreate", async (msg) => {
   if (msg.content.startsWith("ns")) {
     const voiceChannel = msg.member.voice.channel;
-    const text = msg.content.slice(4); // Extract text after the command
+    const text = msg.content.slice(3); // Extract text after the command
     if (!voiceChannel) return msg.reply("Bạn cần vào voice channel trước !");
-    if (text.length < 4) return msg.reply("Bạn cần nhập nội dung cần nói !");
+    if (text.length < 1) return msg.reply("Bạn cần nhập nội dung cần nói !");
     if (TTS_C.get("start") && TTS_C.get("start").channel.id !== voiceChannel.id)
       return msg.reply("Tui đang phát ở một kênh khác, xin vui lòng chờ đợi !");
     const stream = discordTTS.getVoiceStream(text, { lang: "vi" });
