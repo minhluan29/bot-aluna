@@ -197,6 +197,10 @@ client.on("messageCreate", async (message) => {
   command === "hãi" && message.reply("**Hãi cc**");
   command === "lỏ" && message.reply("**Lỏ cc, mày mới lỏ á 😡**");
   command === "xấu" && message.reply("**Mày mới xấu á 😡**");
+  command === "chạy" &&
+    message.reply(
+      "https://cdn.discordapp.com/emojis/1119378138246414346.gif?size=96&quality=lossless"
+    );
   const hoi1 = "**Hỏi hỏi cl**";
   const hoi2 = "**Mày là đứa nào mà đòi ?**";
   const hoi3 = "**Cấm hỏi dưới mọi hình thức**";
@@ -308,7 +312,7 @@ client.on("messageCreate", async (message) => {
   //-----------------BAU - CUA----------------
   if (command.includes(`${PREFIX}bc`)) {
     // Đếm ngược từ 5 đến 1
-    for (let i = 5; i > 0; i--) {
+    for (let i = 3; i > 0; i--) {
       await sendChannel(`Game bắt đầu sau: ${i}`);
       await new Promise((resolve) => setTimeout(resolve, 900)); // Chờ 1 giây
     }
@@ -355,8 +359,33 @@ client.on("messageCreate", async (message) => {
       item === "cua" ? (a = cua) : null;
       return a;
     });
+    const bet = message.content.split(" ").map((item) => {
+      let a = "";
+      item.toLowerCase() == "bau" || item.toLowerCase() == "bầu"
+        ? (a = bau)
+        : null;
+      item.toLowerCase() == "nai" ? (a = nai) : null;
+      item.toLowerCase() == "ga" || item.toLowerCase() == "gà"
+        ? (a = ga)
+        : null;
+      item.toLowerCase() == "tom" || item.toLowerCase() == "tôm"
+        ? (a = tom)
+        : null;
+      item.toLowerCase() == "ca" || item.toLowerCase() == "cá"
+        ? (a = ca)
+        : null;
+      item.toLowerCase() == "cua" ? (a = cua) : null;
+      return a;
+    });
+    const isWin = results.filter(
+      (item) => item.toLowerCase() === bet[1].toLowerCase()
+    );
 
-    sendChannel(`** Kết quả: ${results.join(" 🔸 ")} **`);
+    sendChannel(`
+     Người chơi: ${message.author.globalName} đặt cược **${bet[1]}**
+      Kết quả: ** ${results.join(" 🔸 ")} **
+      Bạn ${isWin.length > 0 ? "thằng 🎉" : "thua ❌"}  
+      `);
   }
 
   function drawRoundedRect(ctx, x, y, width, height, radius) {
