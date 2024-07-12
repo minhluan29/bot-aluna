@@ -59,6 +59,8 @@ let currentWord = "";
 client.on("ready", (e) => {
   console.log(`Logged in ready! ${e.user.tag} !`);
 });
+
+//-----------------------BOT - SAY-------------------------------
 client.on("messageCreate", async (msg) => {
   if (msg.content.startsWith("ns")) {
     const voiceChannel = msg.member.voice.channel;
@@ -310,7 +312,8 @@ client.on("messageCreate", async (message) => {
   }
 
   //-----------------BAU - CUA----------------
-  if (command.includes(`${PREFIX}bc`)) {
+  if (command.startsWith(`${PREFIX}bc`)) {
+    if (command.split(" ").length === 1) return message.reply("Sai cú pháp !");
     // Đếm ngược từ 5 đến 1
     for (let i = 3; i > 0; i--) {
       await sendChannel(`Game bắt đầu sau: ${i}`);
