@@ -1,4 +1,14 @@
-const { Client, IntentsBitField, AttachmentBuilder } = require("discord.js");
+const {
+  Client,
+  IntentsBitField,
+  AttachmentBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  EmbedBuilder,
+  ModalBuilder,
+  TextInputBuilder,
+} = require("discord.js");
 const {
   AudioPlayer,
   createAudioResource,
@@ -11,13 +21,7 @@ const discordTTS = require("discord-tts");
 const TTS_C = new Map();
 let voiceConnection;
 let audioPlayer = new AudioPlayer();
-/**
- *
- * @param {Client} client
- */
-let timeoutID = null;
-const timeoutDuration = 30000;
-let OpusScript;
+
 try {
   OpusScript = require("@discordjs/opus");
 } catch (err) {
@@ -32,6 +36,8 @@ const fs = require("fs");
 const moment = require("moment");
 const path = require("path");
 const { createCanvas, loadImage } = require("canvas");
+const { validateEmbedColor, embedEqual } = require("./utils.js");
+const ms = require("ms");
 
 const {
   token,
@@ -49,15 +55,415 @@ const client = new Client({
     IntentsBitField.Flags.GuildMembers,
     IntentsBitField.Flags.GuildMessages,
     IntentsBitField.Flags.MessageContent,
-    IntentsBitField.Flags.AutoModerationConfiguration,
     IntentsBitField.Flags.GuildVoiceStates,
   ],
 });
+let giveaways = [];
+let captchaChallenges = {};
 
 let currentWord = "";
 
 client.on("ready", (e) => {
   console.log(`Logged in ready! ${e.user.tag} !`);
+});
+function parseDuration(duration) {
+  const match = duration.match(/(\d+)([smhd])/);
+  if (!match) return 0;
+
+  const value = parseInt(match[1]);
+  const unit = match[2];
+
+  switch (unit) {
+    case "s":
+      return value * 1000;
+    case "m":
+      return value * 60 * 1000;
+    case "h":
+      return value * 60 * 60 * 1000;
+    case "d":
+      return value * 24 * 60 * 60 * 1000;
+    default:
+      return 0;
+  }
+}
+function generateCaptcha() {
+  const characters = "0123456789";
+  let result = "";
+  for (let i = 0; i < 6; i++) {
+    result += characters.charAt(Math.floor(Math.random() * characters.length));
+  }
+  return result;
+}
+function startGiveaway(interaction, time, winnersCount, prize, description) {
+  const endTime = Date.now() + ms(time);
+  const giveaway = {
+    endTime,
+    winnersCount,
+    prize,
+    description,
+    participants: new Set(),
+    channelId: interaction.channelId,
+    messageId: null,
+    updateInterval: null,
+  };
+
+  giveaways.push(giveaway);
+
+  setTimeout(() => endGiveaway(giveaway), endTime - Date.now());
+
+  giveaway.updateInterval = setInterval(
+    () => updateGiveawayMessage(giveaway),
+    60000
+  );
+
+  return giveaway;
+}
+function updateGiveawayMessage(giveaway, ended = false) {
+  const remainingTime = parseInt(parseInt(giveaway.endTime) / 1000);
+
+  client.channels.cache
+    .get(giveaway.channelId)
+    .messages.fetch(giveaway.messageId)
+    .then((message) => {
+      const originalEmbed = message.embeds[0];
+
+      const updatedEmbed = new EmbedBuilder()
+        .setColor("#00C7FF")
+        .setTitle("🎉 New Giveaway! 🎉")
+        .addFields(
+          { name: "Prize", value: `🏆 **${giveaway.prize}**`, inline: true },
+          {
+            name: "Winners",
+            value: `👥 ${giveaway.winnersCount}`,
+            inline: true,
+          },
+          {
+            name: "Ends In",
+            value: `⏳ ${ended ? "`Ended`" : `<t:${remainingTime}:R>`}
+
+                    `,
+            inline: true,
+          },
+          {
+            name: "Participants",
+            value: `👤 **${giveaway.participants.size}**`,
+            inline: false,
+          }
+        );
+      // .setFooter({ text: originalEmbed.footer.text })
+      // .setTimestamp()
+      // .setThumbnail(originalEmbed.thumbnail.url);
+
+      message.edit({ embeds: [updatedEmbed] });
+    })
+    .catch(console.error);
+}
+
+function endGiveaway(giveaway) {
+  clearInterval(giveaway.updateInterval);
+  updateGiveawayMessage(giveaway, true);
+
+  if (giveaway.participants.size === 0) {
+    client.channels.cache
+      .get(giveaway.channelId)
+      .send("No participants in the giveaway. Winners were not chosen.");
+    return;
+  }
+
+  const participants = Array.from(giveaway.participants);
+  // participants.forEach((userId) => {
+  //   const user = client.users.cache.get(userId);
+  //   if (user) {
+  //     saveUserToFile(user.username);
+  //   }
+  // });
+
+  const winners = participants
+    .sort(() => 0.5 - Math.random())
+    .slice(0, giveaway.winnersCount)
+    .map((userId) => `<@${userId}>`);
+
+  const winnersText = winners.join(", ");
+  const prizeText = giveaway.prize ? `**${giveaway.prize}**` : "the prize";
+  const announcement = `🎉 The giveaway has ended! Congratulations to the winners: ${winnersText}! They won ${prizeText}! 🎉`;
+
+  client.channels.cache.get(giveaway.channelId).send(announcement);
+}
+function msToTime(duration) {
+  let minutes = Math.floor((duration / (1000 * 60)) % 60),
+    hours = Math.floor((duration / (1000 * 60 * 60)) % 24);
+
+  hours = hours < 10 ? "0" + hours : hours;
+  minutes = minutes < 10 ? "0" + minutes : minutes;
+
+  return hours + "h " + minutes + "m";
+}
+
+//-----------------------Application - Commands-------------------------------
+client.on("interactionCreate", async (interaction) => {
+  if (!interaction.isCommand()) return;
+
+  const { commandName } = interaction;
+  try {
+    if (commandName === "ping") {
+      const sent = await interaction.reply({
+        content: "Pinging...",
+        fetchReply: true,
+      });
+      const ping = sent.createdTimestamp - interaction.createdTimestamp;
+      await interaction.editReply(
+        `Pong! Latency is ${ping}ms. API Latency is ${Math.round(
+          client.ws.ping
+        )}ms`
+      );
+    }
+  } catch (error) {
+    console.log("🚀 ~ client.on ~ error:", error);
+  }
+
+  // try {
+  //   if (commandName === "giveaway") {
+  //     const duration = interaction.options.getString("duration");
+  //     const prize = interaction.options.getString("prize");
+  //     const winnersCount = interaction.options.getInteger("winners");
+
+  //     const embed = new EmbedBuilder()
+  //       .setTitle("🎉 Giveaway! 🎉")
+  //       .setDescription(
+  //         `Prize: **${prize}**\nDuration: **${duration}**\nWinners: **${winnersCount}**`
+  //       )
+  //       .setColor("#0000FF");
+
+  //     const button = new ButtonBuilder()
+  //       .setCustomId("giveaway_enter")
+  //       .setLabel("Enter")
+  //       .setStyle(ButtonStyle.Primary);
+
+  //     const row = new ActionRowBuilder().addComponents(button);
+
+  //     const giveawayMessage = await interaction.reply({
+  //       embeds: [embed],
+  //       components: [row],
+  //       fetchReply: true,
+  //     });
+
+  //     const durational = parseDuration(duration) / 1000;
+
+  //     for (let i = 1; i <= durational; i++) {
+  //       const time = durational - i;
+  //       const updatedEmbed = new EmbedBuilder()
+  //         .setTitle("🎉 Giveaway! 🎉")
+  //         .setDescription(
+  //           `Prize: **${prize}**\nDuration: **${time}**\nWinners: **${winnersCount}**`
+  //         )
+  //         .setColor("#0000FF");
+
+  //       await interaction.editReply({
+  //         embeds: [updatedEmbed],
+  //         components: [row],
+  //         fetchReply: true,
+  //       });
+  //     }
+  //     const filter = (i) =>
+  //       i.customId === "giveaway_enter" && i.user.id !== client.user.id;
+  //     const collector = giveawayMessage.createMessageComponentCollector({
+  //       filter,
+  //       time: parseDuration(duration),
+  //     });
+
+  //     const participants = new Set();
+
+  //     collector.on("collect", async (i) => {
+  //       if (!participants.has(i.user.id)) {
+  //         participants.add(i.user.id);
+  //         await i.reply({
+  //           content: "You've entered the giveaway!",
+  //           ephemeral: true,
+  //         });
+  //       } else {
+  //         await i.reply({
+  //           content: "You've already entered the giveaway.",
+  //           ephemeral: true,
+  //         });
+  //       }
+  //     });
+
+  //     collector.on("end", async () => {
+  //       const winners = Array.from(participants)
+  //         .sort(() => 0.5 - Math.random())
+  //         .slice(0, winnersCount);
+
+  //       // Edit the giveaway message to show the winners
+  //       const updatedEmbed = new EmbedBuilder()
+  //         .setTitle("🎉 Giveaway! 🎉")
+  //         .setDescription(
+  //           `Prize: **${prize}**\nDuration: **${duration}**\nWinners: **${winnersCount}**\n\n` +
+  //             `**Winners:** ${
+  //               winners.length > 0
+  //                 ? winners.map((id) => `<@${id}>`).join(", ")
+  //                 : "No winners"
+  //             }`
+  //         )
+  //         .setColor("#00FF00");
+
+  //       await giveawayMessage.edit({ embeds: [updatedEmbed], components: [] });
+
+  //       if (winners.length > 0) {
+  //         await interaction.followUp(
+  //           `Congratulations to the winners: ${winners
+  //             .map((id) => `<@${id}>`)
+  //             .join(", ")}! You won **${prize}**!`
+  //         );
+  //       } else {
+  //         await interaction.followUp("No winners could be determined.");
+  //       }
+  //     });
+  //   }
+  // } catch (error) {
+  //   console.log("🚀 ~ .join ~ error:", error);
+  // }
+});
+
+client.on("interactionCreate", async (interaction) => {
+  if (!interaction.isCommand()) return;
+  const { commandName } = interaction;
+  if (commandName === "giveaway") {
+    await interaction.deferReply({ ephemeral: true });
+
+    const time = interaction.options.getString("duration");
+    const winnersCount = parseInt(
+      interaction.options.getInteger("winners"),
+      10
+    );
+    const prize = interaction.options.getString("prize");
+    const description = interaction.options.getString("description");
+
+    const giveaway = startGiveaway(
+      interaction,
+      time,
+      winnersCount,
+      prize,
+      description
+    );
+
+    const embed = new EmbedBuilder()
+      .setColor("#00C7FF")
+      .setTitle("🎉 New Giveaway! 🎉")
+      .setDescription(`**${description}**`);
+    // .addField("Prize", `🏆 **${prize}**`, true)
+    // .addField("Number of Winners", `👥 ${winnersCount}`, true)
+    // .addField("Ends In", `⏳ ${msToTime(ms(time))}`, true)
+    // .setFooter("Click on 🎉 to join!")
+    // .setTimestamp()
+    // .setThumbnail(
+    //   "https://media.discordapp.net/attachments/1178000797825503352/1178501200769974373/logo_1.png?ex=65765fc5&is=6563eac5&hm=6cb5054b570777c3e458f8ccf384421a44a97aca2fc8414d26b4f5e31fd9ab54&=&format=webp&width=738&height=675"
+    // );
+
+    const joinButton = new ButtonBuilder()
+      .setCustomId(`joinGiveaway_${giveaway.endTime}`)
+      .setLabel("Join")
+      .setStyle("Primary")
+      .setEmoji("🎉");
+
+    const row = new ActionRowBuilder().addComponents(joinButton);
+
+    interaction.channel
+      .send({ embeds: [embed], components: [row] })
+      .then((sentMessage) => {
+        giveaway.messageId = sentMessage.id;
+        updateGiveawayMessage(giveaway);
+      });
+
+    await interaction.followUp({
+      content: "Process completed!",
+      ephemeral: true,
+    });
+  }
+});
+
+client.on("interactionCreate", async (interaction) => {
+  if (
+    interaction.isButton() &&
+    interaction.customId.startsWith("joinGiveaway")
+  ) {
+    const giveawayId = interaction.message.id;
+    const giveaway = giveaways.find(
+      (g) => g.endTime > Date.now() && g.messageId === giveawayId
+    );
+
+    if (giveaway) {
+      const userId = interaction.user.id;
+
+      if (giveaway.participants.has(userId)) {
+        await interaction.reply({
+          content: "You have already joined this giveaway!",
+          ephemeral: true,
+        });
+      } else {
+        const captcha = generateCaptcha();
+        captchaChallenges[userId] = { captcha, giveawayId };
+
+        const captchaModal = new ModalBuilder()
+          .setCustomId("captchaModal")
+          .setTitle(`Captcha Code: ${captcha}`);
+
+        const captchaInput = new TextInputBuilder()
+          .setCustomId("captchaInput")
+          .setLabel("Type the captcha code below")
+          .setPlaceholder("Captcha Code")
+          .setStyle("Short");
+
+        const actionRow = new ActionRowBuilder().addComponents(captchaInput);
+
+        captchaModal.addComponents(actionRow);
+
+        await interaction.showModal(captchaModal);
+      }
+    } else {
+      console.log("Giveaway not found or ended");
+      await interaction.reply({
+        content: "This giveaway has ended.",
+        ephemeral: true,
+      });
+    }
+  }
+
+  if (!interaction.isModalSubmit()) return;
+
+  if (interaction.customId === "captchaModal") {
+    const captchaInput = interaction.fields.getTextInputValue("captchaInput");
+    const userId = interaction.user.id;
+    const captchaInfo = captchaChallenges[userId];
+
+    if (captchaInfo && captchaInput === captchaInfo.captcha) {
+      console.log("Correct CAPTCHA entered");
+      const giveaway = giveaways.find(
+        (g) => g.endTime > Date.now() && g.messageId === captchaInfo.giveawayId
+      );
+
+      if (giveaway) {
+        giveaway.participants.add(userId);
+        interaction.reply({
+          content: "You have joined this giveaway!",
+          ephemeral: true,
+        });
+        updateGiveawayMessage(giveaway);
+      } else {
+        console.log("Valid giveaway not found during CAPTCHA validation");
+        interaction.reply({
+          content: "This giveaway has ended or is no longer available!",
+          ephemeral: true,
+        });
+      }
+    } else {
+      console.log("Incorrect CAPTCHA entered");
+      interaction.reply({
+        content: "لقد كتبت كود الكابتشا خطا, اعد المحاولة!",
+        ephemeral: true,
+      });
+    }
+    delete captchaChallenges[userId];
+  }
 });
 
 //-----------------------BOT - SAY-------------------------------
